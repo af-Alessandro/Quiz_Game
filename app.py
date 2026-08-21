@@ -13,6 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_TIME_LIMIT = 35
 MAX_POINTS = 1000
 MIN_CORRECT_POINTS = 500
+ASSET_VERSION = os.environ.get("RENDER_GIT_COMMIT", str(int(time.time())))[:12]
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chiave_segreta!')
@@ -41,7 +42,7 @@ game_data = {
 }
 
 def get_join_url():
-    return f"{get_public_base_url()}/?pin={game_data['pin']}"
+    return f"{get_public_base_url()}/player?pin={game_data['pin']}"
 
 # Funzione per recuperare l'IP locale (utilizzata come fallback in locale)
 def get_local_ip():
@@ -79,6 +80,25 @@ def get_public_base_url():
 def get_question_time_limit(question):
     return int(question.get("time", DEFAULT_TIME_LIMIT))
 
+def normalize_correct_index(question):
+    correct = question.get("correct")
+    options = question.get("options", [])
+
+    if isinstance(correct, int):
+        return correct if 0 <= correct < len(options) else None
+
+    if isinstance(correct, str):
+        value = correct.strip()
+        if value.isdigit():
+            index = int(value)
+            return index if 0 <= index < len(options) else None
+
+        for index, option in enumerate(options):
+            if value.casefold() == str(option).strip().casefold():
+                return index
+
+    return None
+
 def public_players():
     return [
         {"name": p["name"], "score": p["score"]}
@@ -95,11 +115,16 @@ def current_results():
         return None
 
     q = questions[q_index]
-    correct_index = q["correct"]
+    correct_index = normalize_correct_index(q)
+    if correct_index is None:
+        print(f"Domanda {q_index + 1}: valore 'correct' non valido: {q.get('correct')!r}")
+        return None
+
     correct_text = q["options"][correct_index]
     answers_by_sid = game_data["answers"]
 
     players = []
+    personal_results = {}
     for sid, player in game_data["players"].items():
         if player["name"] == 'HOST':
             continue
@@ -117,20 +142,39 @@ def current_results():
             "correct": is_correct,
             "points": points
         })
+        personal_results[sid] = {
+            "answer": answer,
+            "correct": is_correct,
+            "points": points,
+            "score": player["score"],
+            "correct_answer": correct_index,
+            "correct_text": correct_text
+        }
 
     return {
         "leaderboard": sorted(players, key=lambda x: x["score"], reverse=True),
         "correct": correct_index,
-        "correct_text": correct_text
+        "correct_text": correct_text,
+        "personal_results": personal_results
     }
 
 @app.route('/host')
 def host():
-    return render_template('host.html', pin=game_data["pin"], join_url=get_join_url())
+    return render_template(
+        'host.html',
+        pin=game_data["pin"],
+        join_url=get_join_url(),
+        asset_version=ASSET_VERSION
+    )
 
 @app.route('/')
+@app.route('/player')
 def player():
-    return render_template('player.html', pin=request.args.get("pin", ""))
+    return render_template(
+        'player.html',
+        pin=request.args.get("pin", ""),
+        asset_version=ASSET_VERSION
+    )
 
 # Rotta per la generazione dinamica del QR Code (Locale o Cloud Render)
 @app.route('/qrcode')
@@ -144,6 +188,10 @@ def get_qrcode():
     response = send_file(buf, mimetype='image/png')
     response.headers["Cache-Control"] = "no-store, max-age=0"
     return response
+
+@app.route('/health')
+def health():
+    return {"status": "ok"}
 
 # WebSocket: Connessione Giocatore
 @socketio.on('join_game')
@@ -199,6 +247,11 @@ def handle_reset_game():
 def handle_answer(data):
     answer_idx = data.get('answer')
     q_index = game_data["current_question"]
+
+    try:
+        answer_idx = int(answer_idx)
+    except (TypeError, ValueError):
+        return
     
     if (
         not game_data["question_active"]
@@ -209,12 +262,20 @@ def handle_answer(data):
         return
 
     q = questions[q_index]
+    if answer_idx < 0 or answer_idx >= len(q.get("options", [])):
+        return
+
     time_limit = get_question_time_limit(q)
     elapsed = 0
     if game_data["question_started_at"] is not None:
         elapsed = max(0, time.monotonic() - game_data["question_started_at"])
 
-    is_correct = answer_idx == q["correct"]
+    correct_index = normalize_correct_index(q)
+    if correct_index is None:
+        print(f"Domanda {q_index + 1}: valore 'correct' non valido: {q.get('correct')!r}")
+        return
+
+    is_correct = answer_idx == correct_index
     remaining_ratio = max(0, (time_limit - elapsed) / time_limit)
     points = 0
     if is_correct:
@@ -238,7 +299,10 @@ def handle_end_question():
     game_data["current_question"] += 1
 
     if results:
+        personal_results = results.pop("personal_results", {})
         emit('question_results', results, to=game_data["pin"])
+        for sid, personal_result in personal_results.items():
+            emit('player_result', personal_result, to=sid)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))

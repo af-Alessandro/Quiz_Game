@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Partecipa al Quiz</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version }}" />
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   </head>
   <body class="player-page">
@@ -40,15 +40,19 @@
         <div id="buttons" class="answer-grid hidden">
           <button class="answer-btn red" type="button" onclick="sendAnswer(0)">
             <span>A</span>
+            <strong></strong>
           </button>
           <button class="answer-btn blue" type="button" onclick="sendAnswer(1)">
             <span>B</span>
+            <strong></strong>
           </button>
           <button class="answer-btn yellow" type="button" onclick="sendAnswer(2)">
             <span>C</span>
+            <strong></strong>
           </button>
           <button class="answer-btn green" type="button" onclick="sendAnswer(3)">
             <span>D</span>
+            <strong></strong>
           </button>
         </div>
         <div id="player-result" class="player-result hidden"></div>
@@ -113,28 +117,40 @@
         errorMsg.textContent = data.message || "Impossibile entrare nel quiz.";
       });
 
+      socket.on("connect_error", () => {
+        errorMsg.textContent = "Telefono non collegato al server. Controlla Wi-Fi e indirizzo del QR.";
+      });
+
       socket.on("new_question", (data) => {
         answered = false;
         resultBox.classList.add("hidden");
         resultBox.textContent = "";
         statusMsg.textContent = "Scegli la risposta";
+        [...buttons.querySelectorAll(".answer-btn")].forEach((button, index) => {
+          const text = button.querySelector("strong");
+          text.textContent = (data.options || [])[index] || "";
+        });
         buttons.classList.remove("hidden");
         startTimer(data.time || 35);
       });
 
-      socket.on("question_results", (data) => {
+      socket.on("question_results", () => {
         stopTimer();
-        const me = (data.leaderboard || []).find((player) => player.name === document.getElementById("name").value.trim());
-        if (me && me.correct) {
-          statusMsg.textContent = `Corretta! +${me.points} pt`;
-          resultBox.textContent = `Risposta esatta: ${data.correct_text}`;
+        buttons.classList.add("hidden");
+      });
+
+      socket.on("player_result", (data) => {
+        stopTimer();
+        buttons.classList.add("hidden");
+        if (data.correct) {
+          statusMsg.textContent = `Corretta! +${data.points} pt`;
+          resultBox.textContent = `Totale: ${data.score} pt. Risposta esatta: ${data.correct_text}`;
           resultBox.className = "player-result success";
         } else {
           statusMsg.textContent = "Risposta non corretta";
-          resultBox.textContent = `Risposta esatta: ${data.correct_text}`;
+          resultBox.textContent = `Totale: ${data.score} pt. Risposta esatta: ${data.correct_text}`;
           resultBox.className = "player-result error";
         }
-        buttons.classList.add("hidden");
       });
 
       socket.on("game_over", () => {

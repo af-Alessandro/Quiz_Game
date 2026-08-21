@@ -1,5 +1,6 @@
 import io
 import json
+import math
 import os
 import socket
 import time
@@ -11,6 +12,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_TIME_LIMIT = 35
+question_default_time = DEFAULT_TIME_LIMIT
 MAX_POINTS = 1000
 MIN_CORRECT_POINTS = 500
 ASSET_VERSION = os.environ.get("RENDER_GIT_COMMIT", str(int(time.time())))[:12]
@@ -22,23 +24,35 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Caricamento delle domande dal file esterno JSON
 def load_questions():
+    global question_default_time
+
     try:
         with open(BASE_DIR / 'questions.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
     except FileNotFoundError:
         print("Attenzione: File 'questions.json' non trovato!")
         return []
+
+    if isinstance(data, dict):
+        question_default_time = int(data.get("default_time", DEFAULT_TIME_LIMIT))
+        return data.get("questions", [])
+
+    question_default_time = DEFAULT_TIME_LIMIT
+    return data
 
 questions = load_questions()
 
 # Stato del gioco in memoria
 game_data = {
     "pin": "1234",
-    "players": {},  # {socket_id: {"name": str, "score": int}}
+    "players": {},  # {player_id: {"name": str, "score": int, "sid": str}}
     "current_question": 0,
     "question_active": False,
     "question_started_at": None,
-    "answers": {}
+    "answers": {},
+    "phase": "lobby",
+    "last_results": None,
+    "last_personal_results": {}
 }
 
 def get_join_url():
@@ -78,7 +92,7 @@ def get_public_base_url():
     return base_url
 
 def get_question_time_limit(question):
-    return int(question.get("time", DEFAULT_TIME_LIMIT))
+    return int(question.get("time", question_default_time))
 
 def normalize_correct_index(question):
     correct = question.get("correct")
@@ -103,11 +117,63 @@ def public_players():
     return [
         {"name": p["name"], "score": p["score"]}
         for p in game_data["players"].values()
-        if p["name"] != 'HOST'
     ]
 
 def leaderboard():
     return sorted(public_players(), key=lambda x: x["score"], reverse=True)
+
+def player_names():
+    return [p["name"] for p in game_data["players"].values()]
+
+def player_id_for_sid(sid):
+    for player_id, player in game_data["players"].items():
+        if player.get("sid") == sid:
+            return player_id
+    return None
+
+def question_payload(q_index=None):
+    if q_index is None:
+        q_index = game_data["current_question"]
+    if q_index >= len(questions):
+        return None
+
+    q = questions[q_index]
+    time_limit = get_question_time_limit(q)
+    remaining = time_limit
+    if game_data["question_started_at"] is not None:
+        elapsed = max(0, time.monotonic() - game_data["question_started_at"])
+        remaining = max(0, math.ceil(time_limit - elapsed))
+
+    return {
+        "question": q["question"],
+        "options": q["options"],
+        "time": time_limit,
+        "remaining": remaining,
+        "number": q_index + 1,
+        "total": len(questions)
+    }
+
+def emit_current_state(player_id=None):
+    state = {
+        "phase": game_data["phase"],
+        "players": player_names(),
+        "leaderboard": leaderboard(),
+        "current_question": game_data["current_question"],
+        "total": len(questions)
+    }
+
+    if game_data["phase"] == "question":
+        state["question"] = question_payload()
+        if player_id:
+            state["answered"] = player_id in game_data["answers"]
+    elif game_data["phase"] == "results":
+        state["results"] = game_data["last_results"]
+        if player_id:
+            state["player_result"] = game_data["last_personal_results"].get(player_id)
+    elif game_data["phase"] == "game_over":
+        state["leaderboard"] = leaderboard()
+
+    emit("game_state", state)
 
 def current_results():
     q_index = game_data["current_question"]
@@ -121,15 +187,12 @@ def current_results():
         return None
 
     correct_text = q["options"][correct_index]
-    answers_by_sid = game_data["answers"]
+    answers_by_player = game_data["answers"]
 
     players = []
     personal_results = {}
-    for sid, player in game_data["players"].items():
-        if player["name"] == 'HOST':
-            continue
-
-        answer_data = answers_by_sid.get(sid, {})
+    for player_id, player in game_data["players"].items():
+        answer_data = answers_by_player.get(player_id, {})
         answer = answer_data.get("answer")
         is_correct = answer == correct_index
         points = answer_data.get("points", 0) if is_correct else 0
@@ -142,7 +205,7 @@ def current_results():
             "correct": is_correct,
             "points": points
         })
-        personal_results[sid] = {
+        personal_results[player_id] = {
             "answer": answer,
             "correct": is_correct,
             "points": points,
@@ -197,56 +260,75 @@ def health():
 @socketio.on('join_game')
 def handle_join(data):
     pin = data.get('pin')
-    name = data.get('name')
+    name = (data.get('name') or "").strip()
+    player_id = (data.get('player_id') or request.sid).strip()
     
-    if pin == game_data["pin"]:
-        join_room(pin)
-        game_data["players"][request.sid] = {"name": name, "score": 0}
-        
-        player_names = [p["name"] for p in game_data["players"].values() if p["name"] != 'HOST']
-        emit('player_joined', {"players": player_names}, to=pin)
-        emit('join_success', {"status": "ok"})
-    else:
+    if pin != game_data["pin"]:
         emit('join_error', {"message": "PIN Errato"})
+        return
+
+    if not name:
+        emit('join_error', {"message": "Inserisci il nome"})
+        return
+
+    join_room(pin)
+    existing_score = game_data["players"].get(player_id, {}).get("score", 0)
+    game_data["players"][player_id] = {
+        "name": name,
+        "score": existing_score,
+        "sid": request.sid
+    }
+
+    emit('player_joined', {"players": player_names()}, to=pin)
+    emit('join_success', {"status": "ok", "player_id": player_id, "name": name})
+    emit_current_state(player_id)
+
+@socketio.on('join_host')
+def handle_join_host(data):
+    pin = data.get('pin')
+    if pin != game_data["pin"]:
+        emit('join_error', {"message": "PIN Errato"})
+        return
+
+    join_room(pin)
+    emit_current_state()
 
 # WebSocket: Avvio Domanda
 @socketio.on('start_next_question')
 def handle_next_question():
     q_index = game_data["current_question"]
     if q_index < len(questions):
-        q = questions[q_index]
-        time_limit = get_question_time_limit(q)
         game_data["question_active"] = True
         game_data["question_started_at"] = time.monotonic()
         game_data["answers"] = {}
+        game_data["phase"] = "question"
+        game_data["last_results"] = None
+        game_data["last_personal_results"] = {}
 
-        emit('new_question', {
-            "question": q["question"],
-            "options": q["options"],
-            "time": time_limit,
-            "number": q_index + 1,
-            "total": len(questions)
-        }, to=game_data["pin"])
+        emit('new_question', question_payload(q_index), to=game_data["pin"])
     else:
+        game_data["phase"] = "game_over"
         emit('game_over', {"leaderboard": leaderboard()}, to=game_data["pin"])
 
 @socketio.on('reset_game')
 def handle_reset_game():
+    game_data["players"] = {}
     game_data["current_question"] = 0
     game_data["question_active"] = False
     game_data["question_started_at"] = None
     game_data["answers"] = {}
-    for player in game_data["players"].values():
-        player["score"] = 0
+    game_data["phase"] = "lobby"
+    game_data["last_results"] = None
+    game_data["last_personal_results"] = {}
 
-    player_names = [p["name"] for p in game_data["players"].values() if p["name"] != 'HOST']
-    emit('game_reset', {"players": player_names}, to=game_data["pin"])
+    emit('game_reset', {"players": [], "clear_players": True}, to=game_data["pin"])
 
 # WebSocket: Invio Risposta
 @socketio.on('submit_answer')
 def handle_answer(data):
     answer_idx = data.get('answer')
     q_index = game_data["current_question"]
+    player_id = player_id_for_sid(request.sid)
 
     try:
         answer_idx = int(answer_idx)
@@ -256,8 +338,8 @@ def handle_answer(data):
     if (
         not game_data["question_active"]
         or q_index >= len(questions)
-        or request.sid not in game_data["players"]
-        or request.sid in game_data["answers"]
+        or player_id not in game_data["players"]
+        or player_id in game_data["answers"]
     ):
         return
 
@@ -282,7 +364,7 @@ def handle_answer(data):
         speed_bonus = int((MAX_POINTS - MIN_CORRECT_POINTS) * remaining_ratio)
         points = MIN_CORRECT_POINTS + speed_bonus
 
-    game_data["answers"][request.sid] = {
+    game_data["answers"][player_id] = {
         "answer": answer_idx,
         "correct": is_correct,
         "points": points
@@ -300,9 +382,14 @@ def handle_end_question():
 
     if results:
         personal_results = results.pop("personal_results", {})
+        game_data["phase"] = "results"
+        game_data["last_results"] = results
+        game_data["last_personal_results"] = personal_results
         emit('question_results', results, to=game_data["pin"])
-        for sid, personal_result in personal_results.items():
-            emit('player_result', personal_result, to=sid)
+        for player_id, personal_result in personal_results.items():
+            sid = game_data["players"].get(player_id, {}).get("sid")
+            if sid:
+                emit('player_result', personal_result, to=sid)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))

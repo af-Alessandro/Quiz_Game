@@ -170,6 +170,10 @@ def emit_current_state(player_id=None):
         state["results"] = game_data["last_results"]
         if player_id:
             state["player_result"] = game_data["last_personal_results"].get(player_id)
+    elif game_data["phase"] == "game_over" and game_data["last_results"]:
+        state["results"] = game_data["last_results"]
+        if player_id:
+            state["player_result"] = game_data["last_personal_results"].get(player_id)
     elif game_data["phase"] == "game_over":
         state["leaderboard"] = leaderboard()
 
@@ -382,7 +386,9 @@ def handle_end_question():
 
     if results:
         personal_results = results.pop("personal_results", {})
-        game_data["phase"] = "results"
+        is_final_question = game_data["current_question"] >= len(questions)
+        results["final"] = is_final_question
+        game_data["phase"] = "game_over" if is_final_question else "results"
         game_data["last_results"] = results
         game_data["last_personal_results"] = personal_results
         emit('question_results', results, to=game_data["pin"])

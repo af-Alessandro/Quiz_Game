@@ -190,7 +190,8 @@
         socket.emit("end_question");
       }
 
-      function renderLeaderboard(players) {
+      function renderLeaderboard(players, options = {}) {
+        const showQuestionPoints = Boolean(options.showQuestionPoints);
         renderList(document.getElementById("leaderboard"), players || [], (player, index) => {
           const li = document.createElement("li");
           const rank = document.createElement("span");
@@ -198,13 +199,13 @@
           const score = document.createElement("span");
 
           rank.textContent = `${index + 1}`;
-          name.textContent = player.correct
+          name.textContent = showQuestionPoints && player.correct
             ? `${player.name} (+${player.points})`
             : `${player.name}`;
-          score.textContent = `${player.score} pt`;
+          score.textContent = `${player.score || 0} pt`;
 
           li.append(rank, name, score);
-          li.classList.toggle("missed", !player.correct);
+          li.classList.toggle("missed", showQuestionPoints && !player.correct);
           return li;
         });
       }
@@ -212,12 +213,14 @@
       socket.on("question_results", (data) => {
         stopTimer();
         questionOpen = false;
-        document.getElementById("leaderboard-title").textContent = "Classifica parziale";
-        document.getElementById("next-btn").classList.remove("hidden");
+        document.getElementById("leaderboard-title").textContent = data.final
+          ? "Classifica finale"
+          : "Classifica parziale";
+        document.getElementById("next-btn").classList.toggle("hidden", Boolean(data.final));
         const correctBox = document.getElementById("correct-answer");
         correctBox.textContent = `Risposta esatta: ${optionLetters[data.correct]} - ${data.correct_text}`;
         correctBox.classList.remove("hidden");
-        renderLeaderboard(data.leaderboard);
+        renderLeaderboard(data.leaderboard, { showQuestionPoints: !data.final });
         setScreen(leaderboardBox);
       });
 
@@ -248,16 +251,18 @@
           return;
         }
 
-        if (state.phase === "results" && state.results) {
+        if ((state.phase === "results" || state.phase === "game_over") && state.results) {
           const data = state.results;
           stopTimer();
           questionOpen = false;
-          document.getElementById("leaderboard-title").textContent = "Classifica parziale";
-          document.getElementById("next-btn").classList.remove("hidden");
+          document.getElementById("leaderboard-title").textContent = data.final
+            ? "Classifica finale"
+            : "Classifica parziale";
+          document.getElementById("next-btn").classList.toggle("hidden", Boolean(data.final));
           const correctBox = document.getElementById("correct-answer");
           correctBox.textContent = `Risposta esatta: ${optionLetters[data.correct]} - ${data.correct_text}`;
           correctBox.classList.remove("hidden");
-          renderLeaderboard(data.leaderboard);
+          renderLeaderboard(data.leaderboard, { showQuestionPoints: !data.final });
           setScreen(leaderboardBox);
           return;
         }

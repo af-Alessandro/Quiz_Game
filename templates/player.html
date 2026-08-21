@@ -2,114 +2,163 @@
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <title>Partecipa al Quiz</title>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        text-align: center;
-        padding: 20px;
-      }
-      input {
-        padding: 10px;
-        font-size: 16px;
-        margin: 8px 0;
-        width: 80%;
-        max-width: 300px;
-      }
-      .btn-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        max-width: 400px;
-        margin: 20px auto;
-      }
-      .quiz-btn {
-        padding: 30px;
-        font-size: 18px;
-        border: none;
-        border-radius: 8px;
-        color: white;
-        font-weight: bold;
-        cursor: pointer;
-      }
-      .red {
-        background-color: #e21b3c;
-      }
-      .blue {
-        background-color: #1368ce;
-      }
-      .yellow {
-        background-color: #ffa602;
-        color: black;
-      }
-      .green {
-        background-color: #26890c;
-      }
-    </style>
+    <title>Partecipa al Quiz</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   </head>
-  <body>
-    <div id="login">
-      <h2>Unisciti al Quiz</h2>
-      <input type="text" id="pin" placeholder="PIN Gioco" /><br />
-      <input type="text" id="name" placeholder="Il tuo Nome" /><br />
-      <button onclick="join()" style="padding: 10px 20px; font-size: 16px">
-        Entra
-      </button>
-    </div>
+  <body class="player-page">
+    <main class="phone-shell">
+      <section id="login" class="screen player-login">
+        <p class="eyebrow">Game room</p>
+        <h1>Entra nel quiz</h1>
+        <div class="form-stack">
+          <label for="pin">PIN</label>
+          <input
+            type="text"
+            id="pin"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            placeholder="1234"
+            value="{{ pin }}"
+          />
+          <label for="name">Nome</label>
+          <input type="text" id="name" autocomplete="nickname" placeholder="Il tuo nome" />
+          <button class="primary-btn" type="button" onclick="join()">Entra</button>
+        </div>
+        <p id="login-error" class="error-message" role="alert"></p>
+      </section>
 
-    <div id="game" style="display: none">
-      <h3 id="status-msg">Attendi la domanda sullo schermo...</h3>
-      <div id="buttons" class="btn-grid" style="display: none">
-        <button class="quiz-btn red" onclick="sendAnswer(0)">Rosso</button>
-        <button class="quiz-btn blue" onclick="sendAnswer(1)">Blu</button>
-        <button class="quiz-btn yellow" onclick="sendAnswer(2)">Giallo</button>
-        <button class="quiz-btn green" onclick="sendAnswer(3)">Verde</button>
-      </div>
-    </div>
+      <section id="game" class="screen answer-screen hidden">
+        <div class="player-statusbar">
+          <p class="eyebrow">Sei dentro</p>
+          <div class="mini-timer">
+            <span id="player-timer">35</span>
+          </div>
+        </div>
+        <h1 id="status-msg">Attendi la domanda</h1>
+        <div id="buttons" class="answer-grid hidden">
+          <button class="answer-btn red" type="button" onclick="sendAnswer(0)">
+            <span>A</span>
+          </button>
+          <button class="answer-btn blue" type="button" onclick="sendAnswer(1)">
+            <span>B</span>
+          </button>
+          <button class="answer-btn yellow" type="button" onclick="sendAnswer(2)">
+            <span>C</span>
+          </button>
+          <button class="answer-btn green" type="button" onclick="sendAnswer(3)">
+            <span>D</span>
+          </button>
+        </div>
+        <div id="player-result" class="player-result hidden"></div>
+      </section>
+    </main>
 
     <script>
       const socket = io();
+      const login = document.getElementById("login");
+      const game = document.getElementById("game");
+      const buttons = document.getElementById("buttons");
+      const statusMsg = document.getElementById("status-msg");
+      const errorMsg = document.getElementById("login-error");
+      const resultBox = document.getElementById("player-result");
+      let timerId = null;
+      let answered = false;
 
-      // Autocompila il PIN se presente nell'URL dal QR code
-      window.onload = function () {
-        const urlParams = new URLSearchParams(window.location.search);
-        const pinParam = urlParams.get("pin");
-        if (pinParam) {
-          document.getElementById("pin").value = pinParam;
+      function stopTimer() {
+        if (timerId) {
+          clearInterval(timerId);
+          timerId = null;
         }
-      };
+      }
+
+      function startTimer(seconds) {
+        stopTimer();
+        let remaining = seconds || 35;
+        document.getElementById("player-timer").textContent = remaining;
+
+        timerId = setInterval(() => {
+          remaining -= 1;
+          document.getElementById("player-timer").textContent = Math.max(0, remaining);
+          if (remaining <= 0) {
+            stopTimer();
+            buttons.classList.add("hidden");
+            if (!answered) {
+              statusMsg.textContent = "Tempo scaduto";
+            }
+          }
+        }, 1000);
+      }
 
       function join() {
-        const pin = document.getElementById("pin").value;
-        const name = document.getElementById("name").value;
-        if (!name) {
-          alert("Inserisci un nome!");
+        const pin = document.getElementById("pin").value.trim();
+        const name = document.getElementById("name").value.trim();
+
+        errorMsg.textContent = "";
+        if (!pin || !name) {
+          errorMsg.textContent = "Inserisci PIN e nome.";
           return;
         }
-        socket.emit("join_game", { pin: pin, name: name });
+
+        socket.emit("join_game", { pin, name });
       }
 
       socket.on("join_success", () => {
-        document.getElementById("login").style.display = "none";
-        document.getElementById("game").style.display = "block";
+        login.classList.add("hidden");
+        game.classList.remove("hidden");
       });
 
       socket.on("join_error", (data) => {
-        alert(data.message);
+        errorMsg.textContent = data.message || "Impossibile entrare nel quiz.";
       });
 
-      socket.on("new_question", () => {
-        document.getElementById("status-msg").innerText = "Scegli la risposta!";
-        document.getElementById("buttons").style.display = "grid";
+      socket.on("new_question", (data) => {
+        answered = false;
+        resultBox.classList.add("hidden");
+        resultBox.textContent = "";
+        statusMsg.textContent = "Scegli la risposta";
+        buttons.classList.remove("hidden");
+        startTimer(data.time || 35);
+      });
+
+      socket.on("question_results", (data) => {
+        stopTimer();
+        const me = (data.leaderboard || []).find((player) => player.name === document.getElementById("name").value.trim());
+        if (me && me.correct) {
+          statusMsg.textContent = `Corretta! +${me.points} pt`;
+          resultBox.textContent = `Risposta esatta: ${data.correct_text}`;
+          resultBox.className = "player-result success";
+        } else {
+          statusMsg.textContent = "Risposta non corretta";
+          resultBox.textContent = `Risposta esatta: ${data.correct_text}`;
+          resultBox.className = "player-result error";
+        }
+        buttons.classList.add("hidden");
+      });
+
+      socket.on("game_over", () => {
+        stopTimer();
+        statusMsg.textContent = "Quiz finito";
+        buttons.classList.add("hidden");
+      });
+
+      socket.on("game_reset", () => {
+        stopTimer();
+        answered = false;
+        statusMsg.textContent = "Attendi la domanda";
+        resultBox.classList.add("hidden");
+        buttons.classList.add("hidden");
       });
 
       function sendAnswer(index) {
+        if (answered) {
+          return;
+        }
+        answered = true;
         socket.emit("submit_answer", { answer: index });
-        document.getElementById("buttons").style.display = "none";
-        document.getElementById("status-msg").innerText =
-          "Risposta inviata! Attendi gli altri...";
+        buttons.classList.add("hidden");
+        statusMsg.textContent = "Risposta inviata";
       }
     </script>
   </body>

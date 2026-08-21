@@ -2,107 +2,235 @@
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Quiz Host</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        text-align: center;
-        padding: 20px;
-      }
-      .qr-container {
-        margin: 20px 0;
-      }
-      .qr-container img {
-        width: 220px;
-        height: 220px;
-        border: 2px solid #333;
-        border-radius: 8px;
-      }
-      button {
-        padding: 12px 24px;
-        font-size: 16px;
-        cursor: pointer;
-        border-radius: 5px;
-        margin-top: 15px;
-      }
-      ul,
-      ol {
-        list-style-position: inside;
-      }
-    </style>
   </head>
-  <body>
-    <div id="lobby">
-      <h1>PIN di Gioco: <span id="pin-display">1234</span></h1>
+  <body class="host-page">
+    <main class="shell">
+      <section id="lobby" class="screen screen-grid">
+        <div class="hero-panel">
+          <p class="eyebrow">Lobby live</p>
+          <h1>PIN <span id="pin-display">{{ pin }}</span></h1>
+          <p class="lead">Scansiona il codice oppure entra da telefono con il PIN.</p>
 
-      <div class="qr-container">
-        <h3>Scansiona per entrare direttamente:</h3>
-        <img src="/qrcode" alt="QR Code per Gioco" />
-      </div>
+          <div class="host-actions">
+            <button class="primary-btn" type="button" onclick="nextQuestion()">
+              Inizia quiz
+            </button>
+            <button class="secondary-btn" type="button" onclick="resetGame()">
+              Reset
+            </button>
+          </div>
+        </div>
 
-      <h2>Giocatori Connessi:</h2>
-      <ul id="player-list"></ul>
-      <button onclick="nextQuestion()">Inizia / Prossima Domanda</button>
-    </div>
+        <aside class="side-panel">
+          <div class="qr-card">
+            <img
+              id="qr-image"
+              src="{{ url_for('get_qrcode') }}?v={{ pin }}"
+              alt="QR Code per entrare nel quiz"
+              loading="eager"
+            />
+            <p id="qr-fallback" class="muted hidden">
+              QR non caricato. Apri questa pagina e ricarica, oppure usa il PIN {{ pin }}.
+            </p>
+            <a class="join-link" href="{{ join_url }}">{{ join_url }}</a>
+          </div>
 
-    <div id="question-box" style="display: none">
-      <h2 id="q-text"></h2>
-      <ol id="q-options"></ol>
-      <button onclick="endQuestion()">Mostra Risultati</button>
-    </div>
+          <div class="players-box">
+            <div class="section-title">
+              <h2>Giocatori</h2>
+              <span id="player-count">0</span>
+            </div>
+            <ul id="player-list" class="player-list"></ul>
+          </div>
+        </aside>
+      </section>
 
-    <div id="leaderboard-box" style="display: none">
-      <h2>Classifica Parziale</h2>
-      <ol id="leaderboard"></ol>
-      <button onclick="nextQuestion()">Prossima Domanda</button>
-    </div>
+      <section id="question-box" class="screen question-screen hidden">
+        <div class="question-topbar">
+          <p id="question-progress" class="eyebrow">Domanda</p>
+          <div class="timer-pill">
+            <span id="timer-value">35</span>
+            <small>sec</small>
+          </div>
+        </div>
+        <h2 id="q-text"></h2>
+        <ol id="q-options" class="option-list"></ol>
+        <button class="primary-btn" type="button" onclick="endQuestion()">Mostra risultati</button>
+      </section>
+
+      <section id="leaderboard-box" class="screen leaderboard-screen hidden">
+        <p class="eyebrow">Punteggi</p>
+        <h2 id="leaderboard-title">Classifica parziale</h2>
+        <div id="correct-answer" class="correct-answer hidden"></div>
+        <ol id="leaderboard" class="leaderboard"></ol>
+        <button id="next-btn" class="primary-btn" type="button" onclick="nextQuestion()">
+          Prossima domanda
+        </button>
+      </section>
+    </main>
 
     <script>
+      const pin = "{{ pin }}";
       const socket = io();
-      socket.emit("join_game", { pin: "1234", name: "HOST" });
+      const lobby = document.getElementById("lobby");
+      const questionBox = document.getElementById("question-box");
+      const leaderboardBox = document.getElementById("leaderboard-box");
+      const optionClasses = ["red", "blue", "yellow", "green"];
+      const optionLetters = ["A", "B", "C", "D"];
+      let timerId = null;
+      let timerRemaining = 35;
+      let questionOpen = false;
+
+      socket.emit("join_game", { pin, name: "HOST" });
+
+      document.getElementById("qr-image").addEventListener("error", () => {
+        document.getElementById("qr-fallback").classList.remove("hidden");
+      });
+
+      function setScreen(active) {
+        [lobby, questionBox, leaderboardBox].forEach((screen) => {
+          screen.classList.toggle("hidden", screen !== active);
+        });
+      }
+
+      function stopTimer() {
+        if (timerId) {
+          clearInterval(timerId);
+          timerId = null;
+        }
+      }
+
+      function startTimer(seconds) {
+        stopTimer();
+        timerRemaining = seconds || 35;
+        questionOpen = true;
+        document.getElementById("timer-value").textContent = timerRemaining;
+
+        timerId = setInterval(() => {
+          timerRemaining -= 1;
+          document.getElementById("timer-value").textContent = Math.max(0, timerRemaining);
+          if (timerRemaining <= 0) {
+            endQuestion();
+          }
+        }, 1000);
+      }
+
+      function renderList(element, items, renderItem) {
+        element.replaceChildren();
+        items.forEach((item, index) => element.appendChild(renderItem(item, index)));
+      }
 
       socket.on("player_joined", (data) => {
         const list = document.getElementById("player-list");
-        list.innerHTML = data.players.map((p) => `<li>${p}</li>`).join("");
+        const players = data.players || [];
+        document.getElementById("player-count").textContent = players.length;
+
+        renderList(list, players, (name) => {
+          const li = document.createElement("li");
+          li.textContent = name;
+          return li;
+        });
       });
 
       function nextQuestion() {
-        document.getElementById("lobby").style.display = "none";
-        document.getElementById("leaderboard-box").style.display = "none";
-        document.getElementById("question-box").style.display = "block";
+        document.getElementById("correct-answer").classList.add("hidden");
+        setScreen(questionBox);
         socket.emit("start_next_question");
       }
 
+      function resetGame() {
+        stopTimer();
+        questionOpen = false;
+        socket.emit("reset_game");
+        document.getElementById("leaderboard").replaceChildren();
+        document.getElementById("q-options").replaceChildren();
+        document.getElementById("q-text").textContent = "";
+        document.getElementById("correct-answer").classList.add("hidden");
+        setScreen(lobby);
+      }
+
       socket.on("new_question", (data) => {
-        document.getElementById("q-text").innerText = data.question;
-        document.getElementById("q-options").innerHTML = data.options
-          .map((o) => `<li>${o}</li>`)
-          .join("");
+        document.getElementById("q-text").textContent = data.question;
+        document.getElementById("question-progress").textContent =
+          `Domanda ${data.number || ""}/${data.total || ""}`;
+        renderList(document.getElementById("q-options"), data.options || [], (option, index) => {
+          const li = document.createElement("li");
+          li.className = `option-card ${optionClasses[index] || ""}`;
+
+          const letter = document.createElement("span");
+          letter.textContent = optionLetters[index] || String.fromCharCode(65 + index);
+
+          const text = document.createElement("strong");
+          text.textContent = option;
+
+          li.append(letter, text);
+          return li;
+        });
+        startTimer(data.time || 35);
       });
 
       function endQuestion() {
+        if (!questionOpen) {
+          return;
+        }
+        questionOpen = false;
+        stopTimer();
         socket.emit("end_question");
       }
 
+      function renderLeaderboard(players) {
+        renderList(document.getElementById("leaderboard"), players || [], (player, index) => {
+          const li = document.createElement("li");
+          const rank = document.createElement("span");
+          const name = document.createElement("strong");
+          const score = document.createElement("span");
+
+          rank.textContent = `${index + 1}`;
+          name.textContent = player.correct
+            ? `${player.name} (+${player.points})`
+            : `${player.name}`;
+          score.textContent = `${player.score} pt`;
+
+          li.append(rank, name, score);
+          li.classList.toggle("missed", !player.correct);
+          return li;
+        });
+      }
+
       socket.on("question_results", (data) => {
-        document.getElementById("question-box").style.display = "none";
-        document.getElementById("leaderboard-box").style.display = "block";
-        document.getElementById("leaderboard").innerHTML = data.leaderboard
-          .map((p) => `<li><strong>${p.name}</strong>: ${p.score} pt</li>`)
-          .join("");
+        stopTimer();
+        questionOpen = false;
+        document.getElementById("leaderboard-title").textContent = "Classifica parziale";
+        document.getElementById("next-btn").classList.remove("hidden");
+        const correctBox = document.getElementById("correct-answer");
+        correctBox.textContent = `Risposta esatta: ${optionLetters[data.correct]} - ${data.correct_text}`;
+        correctBox.classList.remove("hidden");
+        renderLeaderboard(data.leaderboard);
+        setScreen(leaderboardBox);
       });
 
       socket.on("game_over", (data) => {
-        document.getElementById("question-box").style.display = "none";
-        document.getElementById("leaderboard-box").style.display = "block";
-        document.getElementById("leaderboard-box").innerHTML =
-          "<h2>Classifica Finale!</h2>" +
-          "<ol>" +
-          data.leaderboard
-            .map((p) => `<li><strong>${p.name}</strong>: ${p.score} pt</li>`)
-            .join("") +
-          "</ol>";
+        stopTimer();
+        questionOpen = false;
+        document.getElementById("leaderboard-title").textContent = "Classifica finale";
+        document.getElementById("next-btn").classList.add("hidden");
+        document.getElementById("correct-answer").classList.add("hidden");
+        renderLeaderboard(data.leaderboard);
+        setScreen(leaderboardBox);
+      });
+
+      socket.on("game_reset", (data) => {
+        const players = data.players || [];
+        document.getElementById("player-count").textContent = players.length;
+        renderList(document.getElementById("player-list"), players, (name) => {
+          const li = document.createElement("li");
+          li.textContent = name;
+          return li;
+        });
       });
     </script>
   </body>

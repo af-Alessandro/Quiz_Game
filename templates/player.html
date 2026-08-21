@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Partecipa al Quiz</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        padding: 20px;
+      }
+      input {
+        padding: 10px;
+        font-size: 16px;
+        margin: 8px 0;
+        width: 80%;
+        max-width: 300px;
+      }
+      .btn-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        max-width: 400px;
+        margin: 20px auto;
+      }
+      .quiz-btn {
+        padding: 30px;
+        font-size: 18px;
+        border: none;
+        border-radius: 8px;
+        color: white;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .red {
+        background-color: #e21b3c;
+      }
+      .blue {
+        background-color: #1368ce;
+      }
+      .yellow {
+        background-color: #ffa602;
+        color: black;
+      }
+      .green {
+        background-color: #26890c;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="login">
+      <h2>Unisciti al Quiz</h2>
+      <input type="text" id="pin" placeholder="PIN Gioco" /><br />
+      <input type="text" id="name" placeholder="Il tuo Nome" /><br />
+      <button onclick="join()" style="padding: 10px 20px; font-size: 16px">
+        Entra
+      </button>
+    </div>
+
+    <div id="game" style="display: none">
+      <h3 id="status-msg">Attendi la domanda sullo schermo...</h3>
+      <div id="buttons" class="btn-grid" style="display: none">
+        <button class="quiz-btn red" onclick="sendAnswer(0)">Rosso</button>
+        <button class="quiz-btn blue" onclick="sendAnswer(1)">Blu</button>
+        <button class="quiz-btn yellow" onclick="sendAnswer(2)">Giallo</button>
+        <button class="quiz-btn green" onclick="sendAnswer(3)">Verde</button>
+      </div>
+    </div>
+
+    <script>
+      const socket = io();
+
+      // Autocompila il PIN se presente nell'URL dal QR code
+      window.onload = function () {
+        const urlParams = new URLSearchParams(window.location.search);
+        const pinParam = urlParams.get("pin");
+        if (pinParam) {
+          document.getElementById("pin").value = pinParam;
+        }
+      };
+
+      function join() {
+        const pin = document.getElementById("pin").value;
+        const name = document.getElementById("name").value;
+        if (!name) {
+          alert("Inserisci un nome!");
+          return;
+        }
+        socket.emit("join_game", { pin: pin, name: name });
+      }
+
+      socket.on("join_success", () => {
+        document.getElementById("login").style.display = "none";
+        document.getElementById("game").style.display = "block";
+      });
+
+      socket.on("join_error", (data) => {
+        alert(data.message);
+      });
+
+      socket.on("new_question", () => {
+        document.getElementById("status-msg").innerText = "Scegli la risposta!";
+        document.getElementById("buttons").style.display = "grid";
+      });
+
+      function sendAnswer(index) {
+        socket.emit("submit_answer", { answer: index });
+        document.getElementById("buttons").style.display = "none";
+        document.getElementById("status-msg").innerText =
+          "Risposta inviata! Attendi gli altri...";
+      }
+    </script>
+  </body>
+</html>

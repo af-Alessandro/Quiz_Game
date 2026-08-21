@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Quiz Host</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        padding: 20px;
+      }
+      .qr-container {
+        margin: 20px 0;
+      }
+      .qr-container img {
+        width: 220px;
+        height: 220px;
+        border: 2px solid #333;
+        border-radius: 8px;
+      }
+      button {
+        padding: 12px 24px;
+        font-size: 16px;
+        cursor: pointer;
+        border-radius: 5px;
+        margin-top: 15px;
+      }
+      ul,
+      ol {
+        list-style-position: inside;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="lobby">
+      <h1>PIN di Gioco: <span id="pin-display">1234</span></h1>
+
+      <div class="qr-container">
+        <h3>Scansiona per entrare direttamente:</h3>
+        <img src="/qrcode" alt="QR Code per Gioco" />
+      </div>
+
+      <h2>Giocatori Connessi:</h2>
+      <ul id="player-list"></ul>
+      <button onclick="nextQuestion()">Inizia / Prossima Domanda</button>
+    </div>
+
+    <div id="question-box" style="display: none">
+      <h2 id="q-text"></h2>
+      <ol id="q-options"></ol>
+      <button onclick="endQuestion()">Mostra Risultati</button>
+    </div>
+
+    <div id="leaderboard-box" style="display: none">
+      <h2>Classifica Parziale</h2>
+      <ol id="leaderboard"></ol>
+      <button onclick="nextQuestion()">Prossima Domanda</button>
+    </div>
+
+    <script>
+      const socket = io();
+      socket.emit("join_game", { pin: "1234", name: "HOST" });
+
+      socket.on("player_joined", (data) => {
+        const list = document.getElementById("player-list");
+        list.innerHTML = data.players.map((p) => `<li>${p}</li>`).join("");
+      });
+
+      function nextQuestion() {
+        document.getElementById("lobby").style.display = "none";
+        document.getElementById("leaderboard-box").style.display = "none";
+        document.getElementById("question-box").style.display = "block";
+        socket.emit("start_next_question");
+      }
+
+      socket.on("new_question", (data) => {
+        document.getElementById("q-text").innerText = data.question;
+        document.getElementById("q-options").innerHTML = data.options
+          .map((o) => `<li>${o}</li>`)
+          .join("");
+      });
+
+      function endQuestion() {
+        socket.emit("end_question");
+      }
+
+      socket.on("question_results", (data) => {
+        document.getElementById("question-box").style.display = "none";
+        document.getElementById("leaderboard-box").style.display = "block";
+        document.getElementById("leaderboard").innerHTML = data.leaderboard
+          .map((p) => `<li><strong>${p.name}</strong>: ${p.score} pt</li>`)
+          .join("");
+      });
+
+      socket.on("game_over", (data) => {
+        document.getElementById("question-box").style.display = "none";
+        document.getElementById("leaderboard-box").style.display = "block";
+        document.getElementById("leaderboard-box").innerHTML =
+          "<h2>Classifica Finale!</h2>" +
+          "<ol>" +
+          data.leaderboard
+            .map((p) => `<li><strong>${p.name}</strong>: ${p.score} pt</li>`)
+            .join("") +
+          "</ol>";
+      });
+    </script>
+  </body>
+</html>

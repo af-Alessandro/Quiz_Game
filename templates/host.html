@@ -71,6 +71,10 @@
           Prossima domanda
         </button>
       </section>
+
+      <button id="new-game-btn" class="new-game-btn hidden" type="button" onclick="resetGame()">
+        Nuova partita
+      </button>
     </main>
 
     <script>
@@ -79,13 +83,16 @@
       const lobby = document.getElementById("lobby");
       const questionBox = document.getElementById("question-box");
       const leaderboardBox = document.getElementById("leaderboard-box");
+      const newGameBtn = document.getElementById("new-game-btn");
       const optionClasses = ["red", "blue", "yellow", "green"];
       const optionLetters = ["A", "B", "C", "D"];
       let timerId = null;
       let timerRemaining = 35;
       let questionOpen = false;
 
-      socket.emit("join_host", { pin });
+      socket.on("connect", () => {
+        socket.emit("join_host", { pin });
+      });
 
       document.getElementById("qr-image").addEventListener("error", () => {
         document.getElementById("qr-fallback").classList.remove("hidden");
@@ -95,6 +102,10 @@
         [lobby, questionBox, leaderboardBox].forEach((screen) => {
           screen.classList.toggle("hidden", screen !== active);
         });
+      }
+
+      function showNewGameButton(show) {
+        newGameBtn.classList.toggle("hidden", !show);
       }
 
       function stopTimer() {
@@ -141,6 +152,7 @@
 
       function nextQuestion() {
         document.getElementById("correct-answer").classList.add("hidden");
+        showNewGameButton(false);
         setScreen(questionBox);
         socket.emit("start_next_question");
       }
@@ -153,6 +165,7 @@
         document.getElementById("q-options").replaceChildren();
         document.getElementById("q-text").textContent = "";
         document.getElementById("correct-answer").classList.add("hidden");
+        showNewGameButton(false);
         setScreen(lobby);
       }
 
@@ -221,6 +234,7 @@
         correctBox.textContent = `Risposta esatta: ${optionLetters[data.correct]} - ${data.correct_text}`;
         correctBox.classList.remove("hidden");
         renderLeaderboard(data.leaderboard, { showQuestionPoints: !data.final });
+        showNewGameButton(Boolean(data.final));
         setScreen(leaderboardBox);
       });
 
@@ -231,6 +245,7 @@
         document.getElementById("next-btn").classList.add("hidden");
         document.getElementById("correct-answer").classList.add("hidden");
         renderLeaderboard(data.leaderboard);
+        showNewGameButton(true);
         setScreen(leaderboardBox);
       });
 
@@ -240,6 +255,7 @@
         document.getElementById("q-options").replaceChildren();
         document.getElementById("q-text").textContent = "";
         document.getElementById("correct-answer").classList.add("hidden");
+        showNewGameButton(false);
         setScreen(lobby);
       });
 
@@ -263,6 +279,7 @@
           correctBox.textContent = `Risposta esatta: ${optionLetters[data.correct]} - ${data.correct_text}`;
           correctBox.classList.remove("hidden");
           renderLeaderboard(data.leaderboard, { showQuestionPoints: !data.final });
+          showNewGameButton(Boolean(data.final));
           setScreen(leaderboardBox);
           return;
         }
@@ -274,12 +291,14 @@
           document.getElementById("next-btn").classList.add("hidden");
           document.getElementById("correct-answer").classList.add("hidden");
           renderLeaderboard(state.leaderboard);
+          showNewGameButton(true);
           setScreen(leaderboardBox);
           return;
         }
 
         stopTimer();
         questionOpen = false;
+        showNewGameButton(false);
         setScreen(lobby);
       });
     </script>

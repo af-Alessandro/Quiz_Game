@@ -2,34 +2,14 @@
   "default_time": 15,
   "questions": [
     {
-      "question": "Qual è la capitale dell'Italia?",
-      "options": ["Milano", "Roma", "Napoli", "Torino"],
-      "correct": 1
+      "question": "Paolo è gay?",
+      "options": ["4", "SI", "SI", "PAOLIX"],
+      "correct": 3
     },
     {
-      "question": "Quanto fa 5 x 5?",
-      "options": ["10", "20", "25", "30"],
+      "question": "Giuseppe mi ama?",
+      "options": ["SI", "si", "troppo", "Black Clover"],
       "correct": 2
-    },
-    {
-      "question": "In che anno è stato lanciato Python?",
-      "options": ["1989", "1991", "1995", "2000"],
-      "correct": 1
-    },
-    {
-      "question": "In Valorant, quanti giocatori compongono una squadra standard?",
-      "options": ["4", "5", "6", "7"],
-      "correct": 1
-    },
-    {
-      "question": "Quale anime racconta la storia di Eren Yeager?",
-      "options": [
-        "Tokyo Ghoul",
-        "Attack on Titan",
-        "Vinland Saga",
-        "Black Clover"
-      ],
-      "correct": 1
     }
   ]
 }

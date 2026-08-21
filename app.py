@@ -179,6 +179,10 @@ def emit_current_state(player_id=None):
 
     emit("game_state", state)
 
+def emit_to_game(event, payload):
+    emit(event, payload)
+    emit(event, payload, to=game_data["pin"], skip_sid=request.sid)
+
 def current_results():
     q_index = game_data["current_question"]
     if q_index >= len(questions):
@@ -309,10 +313,10 @@ def handle_next_question():
         game_data["last_results"] = None
         game_data["last_personal_results"] = {}
 
-        emit('new_question', question_payload(q_index), to=game_data["pin"])
+        emit_to_game('new_question', question_payload(q_index))
     else:
         game_data["phase"] = "game_over"
-        emit('game_over', {"leaderboard": leaderboard()}, to=game_data["pin"])
+        emit_to_game('game_over', {"leaderboard": leaderboard()})
 
 @socketio.on('reset_game')
 def handle_reset_game():
@@ -325,7 +329,7 @@ def handle_reset_game():
     game_data["last_results"] = None
     game_data["last_personal_results"] = {}
 
-    emit('game_reset', {"players": [], "clear_players": True}, to=game_data["pin"])
+    emit_to_game('game_reset', {"players": [], "clear_players": True})
 
 # WebSocket: Invio Risposta
 @socketio.on('submit_answer')
@@ -391,7 +395,7 @@ def handle_end_question():
         game_data["phase"] = "game_over" if is_final_question else "results"
         game_data["last_results"] = results
         game_data["last_personal_results"] = personal_results
-        emit('question_results', results, to=game_data["pin"])
+        emit_to_game('question_results', results)
         for player_id, personal_result in personal_results.items():
             sid = game_data["players"].get(player_id, {}).get("sid")
             if sid:

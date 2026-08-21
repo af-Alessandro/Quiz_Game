@@ -182,14 +182,35 @@ h2 {
   box-shadow: 0 6px 0 #10131b;
 }
 
+.new-game-btn {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 20;
+  min-height: 54px;
+  padding: 0 22px;
+  border-radius: 8px;
+  background: var(--cyan);
+  color: var(--ink);
+  font-weight: 950;
+  cursor: pointer;
+  box-shadow: 0 6px 0 #0b8f86;
+  transition:
+    transform 160ms ease,
+    filter 160ms ease,
+    box-shadow 160ms ease;
+}
+
 .primary-btn:hover,
-.secondary-btn:hover {
+.secondary-btn:hover,
+.new-game-btn:hover {
   transform: translateY(-2px);
   filter: brightness(1.04);
 }
 
 .primary-btn:active,
-.secondary-btn:active {
+.secondary-btn:active,
+.new-game-btn:active {
   transform: translateY(2px);
   box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
 }
@@ -590,5 +611,12 @@ input:focus {
 
   .answer-btn {
     min-height: 120px;
+  }
+
+  .new-game-btn {
+    right: 10px;
+    bottom: 10px;
+    min-height: 48px;
+    padding: 0 16px;
   }
 }

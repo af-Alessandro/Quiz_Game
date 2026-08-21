@@ -27,7 +27,7 @@ game_data = {
     "current_question": 0
 }
 
-# Funzione per recuperare l'IP locale (utilizzata come fallback)
+# Funzione per recuperare l'IP locale (utilizzata come fallback in locale)
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -47,18 +47,19 @@ def host():
 def player():
     return render_template('player.html')
 
-# Rotta per la generazione dinamica del QR Code (Locale o Cloud)
+# Rotta per la generazione dinamica del QR Code (Locale o Cloud Render)
 @app.route('/qrcode')
 def get_qrcode():
-    # Se la richiesta arriva da localhost, sostituiamo con l'IP locale della rete Wi-Fi
-    # altrimenti manteniamo il dominio pubblico generato da Render/Railway
-    host_url = request.host_url.rstrip('/')
+    # Rileva automaticamente se il sito è in HTTPS (come su Render) o HTTP
+    scheme = request.headers.get('X-Forwarded-Proto', request.scheme)
+    host = request.host
     
-    if "localhost" in host_url or "127.0.0.1" in host_url:
-        local_ip = get_local_ip()
-        base_url = f"http://{local_ip}:5000"
-    else:
-        base_url = host_url
+    # Costruisce l'URL base (es. https://quiz-game.onrender.com)
+    base_url = f"{scheme}://{host}"
+    
+    # Se stai testando sul tuo PC in locale, usa l'IP Wi-Fi per far connettere i telefoni
+    if "localhost" in host or "127.0.0.1" in host:
+        base_url = f"http://{get_local_ip()}:5000"
 
     url = f"{base_url}/?pin={game_data['pin']}"
     

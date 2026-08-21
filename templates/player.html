@@ -67,8 +67,27 @@
       const statusMsg = document.getElementById("status-msg");
       const errorMsg = document.getElementById("login-error");
       const resultBox = document.getElementById("player-result");
+      const playerIdKey = "quiz_player_id";
+      const playerNameKey = "quiz_player_name";
       let timerId = null;
       let answered = false;
+      let joined = false;
+
+      const savedName = localStorage.getItem(playerNameKey);
+      if (savedName) {
+        document.getElementById("name").value = savedName;
+      }
+
+      function getPlayerId() {
+        let playerId = localStorage.getItem(playerIdKey);
+        if (!playerId) {
+          playerId = crypto.randomUUID
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          localStorage.setItem(playerIdKey, playerId);
+        }
+        return playerId;
+      }
 
       function stopTimer() {
         if (timerId) {
@@ -79,7 +98,7 @@
 
       function startTimer(seconds) {
         stopTimer();
-        let remaining = seconds || 35;
+        let remaining = seconds ?? 35;
         document.getElementById("player-timer").textContent = remaining;
 
         timerId = setInterval(() => {
@@ -105,12 +124,40 @@
           return;
         }
 
-        socket.emit("join_game", { pin, name });
+        socket.emit("join_game", { pin, name, player_id: getPlayerId() });
       }
 
-      socket.on("join_success", () => {
+      function showGame() {
         login.classList.add("hidden");
         game.classList.remove("hidden");
+      }
+
+      function renderAnswerOptions(data) {
+        [...buttons.querySelectorAll(".answer-btn")].forEach((button, index) => {
+          const text = button.querySelector("strong");
+          text.textContent = (data.options || [])[index] || "";
+        });
+      }
+
+      function renderPlayerResult(data) {
+        stopTimer();
+        buttons.classList.add("hidden");
+        if (data.correct) {
+          statusMsg.textContent = `Corretta! +${data.points} pt`;
+          resultBox.textContent = `Totale: ${data.score} pt. Risposta esatta: ${data.correct_text}`;
+          resultBox.className = "player-result success";
+        } else {
+          statusMsg.textContent = "Risposta non corretta";
+          resultBox.textContent = `Totale: ${data.score} pt. Risposta esatta: ${data.correct_text}`;
+          resultBox.className = "player-result error";
+        }
+      }
+
+      socket.on("join_success", (data) => {
+        joined = true;
+        localStorage.setItem(playerIdKey, data.player_id);
+        localStorage.setItem(playerNameKey, data.name);
+        showGame();
       });
 
       socket.on("join_error", (data) => {
@@ -126,10 +173,7 @@
         resultBox.classList.add("hidden");
         resultBox.textContent = "";
         statusMsg.textContent = "Scegli la risposta";
-        [...buttons.querySelectorAll(".answer-btn")].forEach((button, index) => {
-          const text = button.querySelector("strong");
-          text.textContent = (data.options || [])[index] || "";
-        });
+        renderAnswerOptions(data);
         buttons.classList.remove("hidden");
         startTimer(data.time || 35);
       });
@@ -140,17 +184,7 @@
       });
 
       socket.on("player_result", (data) => {
-        stopTimer();
-        buttons.classList.add("hidden");
-        if (data.correct) {
-          statusMsg.textContent = `Corretta! +${data.points} pt`;
-          resultBox.textContent = `Totale: ${data.score} pt. Risposta esatta: ${data.correct_text}`;
-          resultBox.className = "player-result success";
-        } else {
-          statusMsg.textContent = "Risposta non corretta";
-          resultBox.textContent = `Totale: ${data.score} pt. Risposta esatta: ${data.correct_text}`;
-          resultBox.className = "player-result error";
-        }
+        renderPlayerResult(data);
       });
 
       socket.on("game_over", () => {
@@ -159,12 +193,64 @@
         buttons.classList.add("hidden");
       });
 
-      socket.on("game_reset", () => {
+      socket.on("game_reset", (data) => {
         stopTimer();
         answered = false;
+        joined = false;
+        if (data.clear_players) {
+          localStorage.removeItem(playerIdKey);
+          localStorage.removeItem(playerNameKey);
+          document.getElementById("name").value = "";
+          login.classList.remove("hidden");
+          game.classList.add("hidden");
+        }
         statusMsg.textContent = "Attendi la domanda";
         resultBox.classList.add("hidden");
         buttons.classList.add("hidden");
+      });
+
+      socket.on("game_state", (state) => {
+        showGame();
+        if (state.phase === "question" && state.question) {
+          resultBox.classList.add("hidden");
+          resultBox.textContent = "";
+          renderAnswerOptions(state.question);
+          startTimer(state.question.remaining ?? state.question.time);
+          answered = Boolean(state.answered);
+          if (answered) {
+            buttons.classList.add("hidden");
+            statusMsg.textContent = "Risposta inviata";
+          } else {
+            buttons.classList.remove("hidden");
+            statusMsg.textContent = "Scegli la risposta";
+          }
+          return;
+        }
+
+        if (state.phase === "results") {
+          answered = true;
+          if (state.player_result) {
+            renderPlayerResult(state.player_result);
+          } else {
+            stopTimer();
+            buttons.classList.add("hidden");
+            statusMsg.textContent = "Attendi la prossima domanda";
+          }
+          return;
+        }
+
+        if (state.phase === "game_over") {
+          stopTimer();
+          buttons.classList.add("hidden");
+          statusMsg.textContent = "Quiz finito";
+          return;
+        }
+
+        stopTimer();
+        answered = false;
+        buttons.classList.add("hidden");
+        resultBox.classList.add("hidden");
+        statusMsg.textContent = "Attendi la domanda";
       });
 
       function sendAnswer(index) {
@@ -176,6 +262,17 @@
         buttons.classList.add("hidden");
         statusMsg.textContent = "Risposta inviata";
       }
+
+      socket.on("connect", () => {
+        if (joined) {
+          return;
+        }
+        const pin = document.getElementById("pin").value.trim();
+        const name = document.getElementById("name").value.trim();
+        if (pin && name && localStorage.getItem(playerIdKey)) {
+          join();
+        }
+      });
     </script>
   </body>
 </html>

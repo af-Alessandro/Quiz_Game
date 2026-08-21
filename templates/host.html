@@ -85,7 +85,7 @@
       let timerRemaining = 35;
       let questionOpen = false;
 
-      socket.emit("join_game", { pin, name: "HOST" });
+      socket.emit("join_host", { pin });
 
       document.getElementById("qr-image").addEventListener("error", () => {
         document.getElementById("qr-fallback").classList.remove("hidden");
@@ -106,7 +106,7 @@
 
       function startTimer(seconds) {
         stopTimer();
-        timerRemaining = seconds || 35;
+        timerRemaining = seconds ?? 35;
         questionOpen = true;
         document.getElementById("timer-value").textContent = timerRemaining;
 
@@ -124,9 +124,8 @@
         items.forEach((item, index) => element.appendChild(renderItem(item, index)));
       }
 
-      socket.on("player_joined", (data) => {
+      function renderPlayers(players) {
         const list = document.getElementById("player-list");
-        const players = data.players || [];
         document.getElementById("player-count").textContent = players.length;
 
         renderList(list, players, (name) => {
@@ -134,6 +133,10 @@
           li.textContent = name;
           return li;
         });
+      }
+
+      socket.on("player_joined", (data) => {
+        renderPlayers(data.players || []);
       });
 
       function nextQuestion() {
@@ -153,7 +156,7 @@
         setScreen(lobby);
       }
 
-      socket.on("new_question", (data) => {
+      function renderQuestion(data, useRemaining = false) {
         document.getElementById("q-text").textContent = data.question;
         document.getElementById("question-progress").textContent =
           `Domanda ${data.number || ""}/${data.total || ""}`;
@@ -170,7 +173,12 @@
           li.append(letter, text);
           return li;
         });
-        startTimer(data.time || 35);
+        startTimer(useRemaining ? data.remaining : data.time || 35);
+        setScreen(questionBox);
+      }
+
+      socket.on("new_question", (data) => {
+        renderQuestion(data);
       });
 
       function endQuestion() {
@@ -224,13 +232,50 @@
       });
 
       socket.on("game_reset", (data) => {
-        const players = data.players || [];
-        document.getElementById("player-count").textContent = players.length;
-        renderList(document.getElementById("player-list"), players, (name) => {
-          const li = document.createElement("li");
-          li.textContent = name;
-          return li;
-        });
+        renderPlayers(data.players || []);
+        document.getElementById("leaderboard").replaceChildren();
+        document.getElementById("q-options").replaceChildren();
+        document.getElementById("q-text").textContent = "";
+        document.getElementById("correct-answer").classList.add("hidden");
+        setScreen(lobby);
+      });
+
+      socket.on("game_state", (state) => {
+        renderPlayers(state.players || []);
+
+        if (state.phase === "question" && state.question) {
+          renderQuestion(state.question, true);
+          return;
+        }
+
+        if (state.phase === "results" && state.results) {
+          const data = state.results;
+          stopTimer();
+          questionOpen = false;
+          document.getElementById("leaderboard-title").textContent = "Classifica parziale";
+          document.getElementById("next-btn").classList.remove("hidden");
+          const correctBox = document.getElementById("correct-answer");
+          correctBox.textContent = `Risposta esatta: ${optionLetters[data.correct]} - ${data.correct_text}`;
+          correctBox.classList.remove("hidden");
+          renderLeaderboard(data.leaderboard);
+          setScreen(leaderboardBox);
+          return;
+        }
+
+        if (state.phase === "game_over") {
+          stopTimer();
+          questionOpen = false;
+          document.getElementById("leaderboard-title").textContent = "Classifica finale";
+          document.getElementById("next-btn").classList.add("hidden");
+          document.getElementById("correct-answer").classList.add("hidden");
+          renderLeaderboard(state.leaderboard);
+          setScreen(leaderboardBox);
+          return;
+        }
+
+        stopTimer();
+        questionOpen = false;
+        setScreen(lobby);
       });
     </script>
   </body>

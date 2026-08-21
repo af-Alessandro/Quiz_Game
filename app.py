@@ -4,9 +4,11 @@ import socket
 import qrcode
 from flask import Flask, render_template, send_file, request
 from flask_socketio import SocketIO, emit, join_room
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'chiave_segreta!'
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Caricamento delle domande dal file esterno JSON
@@ -41,24 +43,19 @@ def get_local_ip():
 
 @app.route('/host')
 def host():
-    return render_template('host.html')
+    return render_template('host.html', pin=game_data["pin"])
 
 @app.route('/')
 def player():
-    return render_template('player.html')
+    return render_template('player.html', pin=request.args.get("pin", ""))
 
 # Rotta per la generazione dinamica del QR Code (Locale o Cloud Render)
 @app.route('/qrcode')
 def get_qrcode():
-    # Rileva automaticamente se il sito è in HTTPS (come su Render) o HTTP
-    scheme = request.headers.get('X-Forwarded-Proto', request.scheme)
-    host = request.host
-    
-    # Costruisce l'URL base (es. https://quiz-game.onrender.com)
-    base_url = f"{scheme}://{host}"
+    base_url = request.host_url.rstrip("/")
     
     # Se stai testando sul tuo PC in locale, usa l'IP Wi-Fi per far connettere i telefoni
-    if "localhost" in host or "127.0.0.1" in host:
+    if "localhost" in request.host or "127.0.0.1" in request.host:
         base_url = f"http://{get_local_ip()}:5000"
 
     url = f"{base_url}/?pin={game_data['pin']}"
@@ -67,7 +64,9 @@ def get_qrcode():
     buf = io.BytesIO()
     img.save(buf, 'PNG')
     buf.seek(0)
-    return send_file(buf, mimetype='image/png')
+    response = send_file(buf, mimetype='image/png')
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 # WebSocket: Connessione Giocatore
 @socketio.on('join_game')

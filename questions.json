@@ -2,13 +2,13 @@
   "default_time": 15,
   "questions": [
     {
-      "question": "Paolo è gay?",
-      "options": ["4", "SI", "SI", "PAOLIX"],
+      "question": "01 or one zero",
+      "options": ["4", "SI", "SI", "Marco"],
       "correct": 3
     },
     {
-      "question": "Giuseppe mi ama?",
-      "options": ["SI", "si", "troppo", "Black Clover"],
+      "question": "azubalele?",
+      "options": ["SI", "si", "troppo", "Fotonico"],
       "correct": 2
     }
   ]
